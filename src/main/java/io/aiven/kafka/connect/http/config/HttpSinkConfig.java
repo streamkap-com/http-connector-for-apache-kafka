@@ -69,12 +69,16 @@ public final class HttpSinkConfig extends AbstractConfig {
     private static final String BATCHING_GROUP = "Batching";
     private static final String BATCHING_ENABLED_CONFIG = "batching.enabled";
     private static final String BATCH_MAX_SIZE_CONFIG = "batch.max.size";
+    private static final String BATCH_MAX_TIME_MS_CONFIG = "batch.max.time.ms";
+    private static final long BATCH_MAX_TIME_MS_DEFAULT = 60000L;
     private static final String BATCH_PREFIX_CONFIG = "batch.prefix";
     private static final String BATCH_PREFIX_DEFAULT = "";
     private static final String BATCH_SUFFIX_CONFIG = "batch.suffix";
     private static final String BATCH_SUFFIX_DEFAULT = "\n";
     private static final String BATCH_SEPARATOR_CONFIG = "batch.separator";
     private static final String BATCH_SEPARATOR_DEFAULT = "\n";
+    private static final String BATCH_BUFFERING_ENABLED_CONFIG = "batch.buffering.enabled";
+
 
     private static final String DELIVERY_GROUP = "Delivery";
     private static final String MAX_RETRIES_CONFIG = "max.retries";
@@ -478,6 +482,19 @@ public final class HttpSinkConfig extends AbstractConfig {
         );
 
         configDef.define(
+                BATCH_MAX_TIME_MS_CONFIG,
+                ConfigDef.Type.LONG,
+                BATCH_MAX_TIME_MS_DEFAULT,
+                ConfigDef.Range.between(1, 1_000_000_000),
+                ConfigDef.Importance.MEDIUM,
+                "Maximum time to wait before flushing a batch (ms)",
+                BATCHING_GROUP,
+                groupCounter++,
+                ConfigDef.Width.MEDIUM,
+                BATCHING_GROUP
+        );
+
+        configDef.define(
             BATCH_PREFIX_CONFIG,
             ConfigDef.Type.STRING,
             BATCH_PREFIX_DEFAULT,
@@ -517,6 +534,19 @@ public final class HttpSinkConfig extends AbstractConfig {
             groupCounter++,
             ConfigDef.Width.MEDIUM,
             BATCHING_GROUP
+        );
+
+        configDef.define(
+                BATCH_BUFFERING_ENABLED_CONFIG,
+                ConfigDef.Type.BOOLEAN,
+                false,
+                ConfigDef.Importance.MEDIUM,
+                "Enable buffering for batching. If true, "
+                        + "records are buffered up to batch.max.size or batch.max.time.ms.",
+                BATCHING_GROUP,
+                groupCounter++,
+                ConfigDef.Width.MEDIUM,
+                BATCHING_GROUP
         );
     }
 
@@ -727,8 +757,16 @@ public final class HttpSinkConfig extends AbstractConfig {
         return getBoolean(BATCHING_ENABLED_CONFIG);
     }
 
+    public final boolean batchBufferingEnabled() {
+        return getBoolean(BATCH_BUFFERING_ENABLED_CONFIG);
+    }
+
     public final int batchMaxSize() {
         return getInt(BATCH_MAX_SIZE_CONFIG);
+    }
+
+    public final long batchMaxTimeMs() {
+        return getLong(BATCH_MAX_TIME_MS_CONFIG);
     }
 
     // currently just getting this for a configuration check

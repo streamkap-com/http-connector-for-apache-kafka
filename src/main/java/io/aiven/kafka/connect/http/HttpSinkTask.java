@@ -16,9 +16,15 @@
 
 package io.aiven.kafka.connect.http;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
@@ -42,6 +48,14 @@ public final class HttpSinkTask extends SinkTask {
     // flag for legacy support (configured for batch mode, not using errors.tolerance)
     private boolean useLegacySend;
 
+    // buffering for batch sending
+    private final List<SinkRecord> buffer = new ArrayList<>();
+    private int batchMaxSize;
+    private long batchMaxTimeMs;
+    private boolean batchBufferingEnabled;
+    private ScheduledExecutorService scheduler;
+    private ScheduledFuture<?> scheduledFlush;
+
     // required by Connect
     public HttpSinkTask() {
     }
@@ -53,6 +67,7 @@ public final class HttpSinkTask extends SinkTask {
         final var httpSender = HttpSenderFactory.createHttpSender(config);
         this.recordSender = RecordSender.createRecordSender(httpSender, config);
         this.useLegacySend = config.batchingEnabled();
+        this.batchBufferingEnabled = config.batchBufferingEnabled();
 
         if (Objects.nonNull(config.kafkaRetryBackoffMs())) {
             context.timeout(config.kafkaRetryBackoffMs());
@@ -69,19 +84,67 @@ public final class HttpSinkTask extends SinkTask {
             // Will occur in Connect runtimes earlier than 2.6
             log.warn("Apache Kafka versions prior to 2.6 do not support the errant record reporter.");
         }
+
+        this.batchMaxSize = config.batchMaxSize(); // get from config
+        this.batchMaxTimeMs = config.batchMaxTimeMs(); // get from config
+
+        // Only start scheduler if both batching and buffering are enabled
+        if (useLegacySend && batchBufferingEnabled) {
+            scheduler = Executors.newSingleThreadScheduledExecutor();
+            scheduledFlush = scheduler.scheduleAtFixedRate(
+                    this::flushBufferSafely,
+                    batchMaxTimeMs,
+                    batchMaxTimeMs,
+                    TimeUnit.MILLISECONDS
+            );
+        }
     }
 
     @Override
     public void put(final Collection<SinkRecord> records) {
         log.debug("Received {} records", records.size());
-
-        if (!records.isEmpty()) {
-            // use the batch send if legacy send is enabled
-            if (!useLegacySend) {
+        if (useLegacySend) {
+            sendBatch(records);
+        } else {
+            if (!records.isEmpty()) {
                 sendEach(records);
-            } else {
-                sendBatch(records);
             }
+        }
+    }
+
+    private void flushBuffer() {
+        final List<SinkRecord> toSend;
+        synchronized (buffer) {
+            if (buffer.isEmpty()) {
+                return;
+            }
+            toSend = new ArrayList<>(buffer);
+            buffer.clear();
+        }
+        for (final var record : toSend) {
+            if (record.value() == null) {
+                throw new DataException("Record value must not be null");
+            }
+        }
+        try {
+            recordSender.send(toSend);
+        } catch (final ConnectException e) {
+            if (reporter != null) {
+                for (final var record : toSend) {
+                    reporter.report(record, e);
+                }
+            } else {
+                throw new ConnectException(e.getMessage());
+            }
+        }
+    }
+
+
+    private void flushBufferSafely() {
+        try {
+            flushBuffer();
+        } catch (final Exception e) {
+            log.error("Error during scheduled buffer flush", e);
         }
     }
 
@@ -115,19 +178,32 @@ public final class HttpSinkTask extends SinkTask {
      * @param records to send
      */
     private void sendBatch(final Collection<SinkRecord> records) {
-        for (final var record : records) {
-            if (record.value() == null) {
-                // TODO: consider optionally process them, e.g. use another verb or ignore
-                throw new DataException("Record value must not be null");
+        synchronized (buffer) {
+            // if buffering is disabled, add all records to buffer and flush immediately
+            if (!batchBufferingEnabled) {
+                buffer.addAll(records);
+                flushBuffer();
+            } else {
+                for (final SinkRecord record : records) {
+                    buffer.add(record);
+                    if (buffer.size() >= batchMaxSize) {
+                        flushBuffer();
+                    }
+                }
             }
         }
-
-        recordSender.send(records);
     }
+
 
     @Override
     public void stop() {
-        // do nothing
+        if (scheduledFlush != null) {
+            scheduledFlush.cancel(false);
+        }
+        if (scheduler != null) {
+            scheduler.shutdown();
+        }
+        flushBuffer();
     }
 
     @Override
