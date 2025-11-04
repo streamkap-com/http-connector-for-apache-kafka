@@ -89,7 +89,7 @@ public final class HttpSinkConfig extends AbstractConfig {
 
     private static final String FORMATING_GROUP = "Format";
     private static final String AVRO_DECIMAL_FORMAT_CONFIG = "decimal.format";
-
+    private static final String SCHEMA_ENABLED_CONFIG = "schema.enabled";
     public static final String NAME_CONFIG = "name";
 
     private static final String ERRORS_GROUP = "Errors Handling";
@@ -663,6 +663,18 @@ public final class HttpSinkConfig extends AbstractConfig {
                 ConfigDef.Width.MEDIUM,
                 AVRO_DECIMAL_FORMAT_CONFIG
         );
+
+        configDef.define(
+                SCHEMA_ENABLED_CONFIG,
+                ConfigDef.Type.BOOLEAN,
+                false,
+                ConfigDef.Importance.LOW,
+                "Controls if schema information is included in the messages.",
+                FORMATING_GROUP,
+                groupCounter++,
+                ConfigDef.Width.MEDIUM,
+                SCHEMA_ENABLED_CONFIG
+        );
     }
 
     public HttpSinkConfig(final Map<String, String> properties) {
@@ -867,6 +879,10 @@ public final class HttpSinkConfig extends AbstractConfig {
 
     public DecimalFormat decimalFormat() {
         return DecimalFormat.valueOf(getString(AVRO_DECIMAL_FORMAT_CONFIG));
+    }
+
+    public boolean schemaEnabled() {
+        return getBoolean(SCHEMA_ENABLED_CONFIG);
     }
 
     public final boolean sslTrustAllCertificates() {

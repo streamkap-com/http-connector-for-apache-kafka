@@ -28,9 +28,9 @@ class JsonRecordValueConverter implements RecordValueConverter.Converter {
 
     private final JsonConverter jsonConverter;
 
-    public JsonRecordValueConverter(final DecimalFormat decimalFormat) {
+    public JsonRecordValueConverter(final DecimalFormat decimalFormat, final boolean schemaEnabled) {
         this.jsonConverter = new JsonConverter();
-        jsonConverter.configure(Map.of("schemas.enable", false, "converter.type", "value",
+        jsonConverter.configure(Map.of("schemas.enable", schemaEnabled, "converter.type", "value",
                 JsonConverterConfig.DECIMAL_FORMAT_CONFIG, decimalFormat.name()));
     }
 
